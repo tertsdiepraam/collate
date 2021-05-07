@@ -1,0 +1,5 @@
+# Diagnostic weight ranges
+# Primary weight range:   0200..5C37 (23096)
+# Secondary weight range: 0020..011C (253)
+# Variant secondaries:    0118..011C (5)
+# Tertiary weight range:  0002..001F (30)
