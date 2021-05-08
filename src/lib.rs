@@ -23,7 +23,7 @@
 ///       * Append the CE_L values from that list to the sort key
 /// * Compare the keys, easy peasy
 mod parse;
-use std::{collections::BTreeMap, ops::Deref, str::Chars};
+use std::{cmp::Ordering, collections::BTreeMap, iter::Peekable, ops::Deref, str::Chars};
 
 use unic_normal::{Decompositions, StrNormalForm};
 
@@ -48,6 +48,22 @@ impl CollationElementTable {
         parse::table(i, &mut data)?;
         Ok(Self { data })
     }
+
+    pub fn generate_sort_key(&self, s: &str) -> SortKey {
+        let mut key = SortKey::new();
+        for elem in CollationElements::from(self, s).flatten() {
+            if elem.primary != 0 {
+                key.primary.push(elem.primary);
+            }
+            if elem.secondary != 0 {
+                key.secondary.push(elem.secondary);
+            }
+            if elem.tertiary != 0 {
+                key.tertiary.push(elem.tertiary)
+            }
+        }
+        key
+    }
 }
 
 impl Deref for CollationElementTable {
@@ -59,7 +75,7 @@ impl Deref for CollationElementTable {
 }
 
 struct CollationElements<'a> {
-    normalized: std::iter::Peekable<Decompositions<Chars<'a>>>,
+    normalized: Peekable<Decompositions<Chars<'a>>>,
     table: &'a CollationElementTable,
 }
 
@@ -117,32 +133,15 @@ impl SortKey {
 }
 
 impl PartialOrd for SortKey {
-    fn partial_cmp(&self, other: &Self) -> Option<std::cmp::Ordering> {
+    fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
         self.iter().partial_cmp(other.iter())
     }
 }
 
 impl Ord for SortKey {
-    fn cmp(&self, other: &Self) -> std::cmp::Ordering {
+    fn cmp(&self, other: &Self) -> Ordering {
         self.iter().cmp(other.iter())
     }
-}
-
-// This skips the third step
-pub fn generate_sort_key(s: &str, table: &CollationElementTable) -> SortKey {
-    let mut key = SortKey::new();
-    for elem in CollationElements::from(&table, s).flatten() {
-        if elem.primary != 0 {
-            key.primary.push(elem.primary);
-        }
-        if elem.secondary != 0 {
-            key.secondary.push(elem.secondary);
-        }
-        if elem.tertiary != 0 {
-            key.tertiary.push(elem.tertiary)
-        }
-    }
-    key
 }
 
 #[cfg(unix)]
@@ -155,12 +154,12 @@ mod test {
 
         // Casing has low precedence
         let mut v = ["a", "b", "C", "A", "c", "B"];
-        v.sort_by_key(|s| generate_sort_key(s, &table));
+        v.sort_by_key(|s| table.generate_sort_key(s));
         assert_eq!(v, ["a", "A", "b", "B", "c", "C"]);
 
         // Casing has lower precedence than letters
         let mut v = ["aaa", "aab", "aAa", "aAb", "aaA", "aaB"];
-        v.sort_by_key(|s| generate_sort_key(s, &table));
+        v.sort_by_key(|s| table.generate_sort_key(s));
         assert_eq!(v, ["aaa", "aaA", "aAa", "aab", "aaB", "aAb"]);
 
         // Some real-world filenames typical in a Rust project
@@ -182,7 +181,7 @@ mod test {
             "examples",
         ];
 
-        v.sort_by_key(|s| generate_sort_key(s, &table));
+        v.sort_by_key(|s| table.generate_sort_key(s));
 
         assert_eq!(
             v,
@@ -211,11 +210,11 @@ mod test {
         let table = CollationElementTable::from(DUCET).unwrap();
 
         let mut v = ["cab", "dab", "Cab", "cáb"];
-        v.sort_by_key(|s| generate_sort_key(s, &table));
+        v.sort_by_key(|s| table.generate_sort_key(s));
         assert_eq!(v, ["cab", "Cab", "cáb", "dab"]);
 
         let mut v = ["e", "A", "á", "a", "E", "Á", "é", "É"];
-        v.sort_by_key(|s| generate_sort_key(s, &table));
+        v.sort_by_key(|s| table.generate_sort_key(s));
         assert_eq!(v, ["a", "A", "á", "Á", "e", "E", "é", "É"]);
     }
 }
