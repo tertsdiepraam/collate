@@ -1,15 +1,34 @@
+/// Steps of the UCA algorithm
+/// * Parse the table
+/// * Normalize each string
+///   * Convert to nfd (unic-normal)
+/// * Construct collation element array
+///   * Find longest initial substring S that has a match in the collation table
+///     * If there are non-starters following S, process each non-starter C
+///     * If C is an unblocked non-starter with respect to S, find if S+C has a match in the collation table
+///     * If there is a match remove S by S+C and remove C
+///   * Fetch the corresponding value from the table, else synthesize one (Derived Collation Elements)
+///   * Process collation elements according to variable weight setting
+///   * Append collation elements to the collation element array
+///   * Proceed to next point past S
+/// * Construct a sort key by successively appending all non-zero weights from the collation element array
+///   * For each weight L in the collation element array from 1 to the maximum level
+///     * If L is not 1, append a level separator
+///     * If the collation element is forwards at level L
+///       * For each collation element CE in the array
+///         * Append CE_L to the sort key if CE_L != 0
+///     * Else the collation element is backwards at level L
+///       * Form a list of all non-zero CE_L values
+///       * Reverse that list
+///       * Append the CE_L values from that list to the sort key
+/// * Compare the keys, easy peasy
+mod parse;
 use std::{collections::BTreeMap, ops::Deref, str::Chars};
 
-use nom::{
-    branch::alt,
-    bytes::complete::{is_not, tag},
-    character::complete::{char, one_of, space0},
-    combinator::{all_consuming, map, map_opt, map_res, opt, recognize, value},
-    multi::{many0, many1, separated_list1},
-    sequence::{delimited, separated_pair, tuple},
-    IResult,
-};
 use unic_normal::{Decompositions, StrNormalForm};
+
+// Default Unicode Collation Element Table
+static DUCET: &'static str = include_str!("../external/allkeys.txt");
 
 #[derive(PartialEq, Eq, PartialOrd, Ord, Clone, Debug)]
 pub struct CollationElement {
@@ -19,96 +38,6 @@ pub struct CollationElement {
     tertiary: u16,
 }
 
-// * Parse the table
-// * Normalize each string
-//   * Convert to nfd (unic-normal)
-// * Construct collation element array
-//   * Find longest initial substring S that has a match in the collation table
-//     * If there are non-starters following S, process each non-starter C
-//     * If C is an unblocked non-starter with respect to S, find if S+C has a match in the collation table
-//     * If there is a match remove S by S+C and remove C
-//   * Fetch the corresponding value from the table, else synthesize one (Derived Collation Elements)
-//   * Process collation elements according to variable weight setting
-//   * Append collation elements to the collation element array
-//   * Proceed to next point past S
-// * Construct a sort key by successively appending all non-zero weights from the collation element array
-//   * For each weight L in the collation element array from 1 to the maximum level
-//     * If L is not 1, append a level separator
-//     * If the collation element is forwards at level L
-//       * For each collation element CE in the array
-//         * Append CE_L to the sort key if CE_L != 0
-//     * Else the collation element is backwards at level L
-//       * Form a list of all non-zero CE_L values
-//       * Reverse that list
-//       * Append the CE_L values from that list to the sort key
-// * Compare the keys, easy peasy
-
-// Default Unicode Collation Element Table
-static DUCET: &'static str = include_str!("../external/allkeys.txt");
-
-fn take_sep(i: &str) -> IResult<&str, ()> {
-    let (i, _) = separated_pair(space0, char(';'), space0)(i)?;
-    Ok((i, ()))
-}
-
-fn parse_element(i: &str) -> IResult<&str, String> {
-    map(separated_list1(char(' '), parse_char), |v| {
-        v.into_iter().collect::<String>()
-    })(i)
-}
-
-fn parse_variable(i: &str) -> IResult<&str, bool> {
-    let (i, c) = alt((tag("*"), tag(".")))(i)?;
-    Ok((i, c == "*"))
-}
-
-fn parse_sortkey(i: &str) -> IResult<&str, CollationElement> {
-    let (i, (var, levels)) = delimited(
-        tag("["),
-        tuple((parse_variable, separated_list1(tag("."), parse_hex))),
-        tag("]"),
-    )(i)?;
-    if levels.len() == 3 {
-        Ok((
-            i,
-            CollationElement {
-                variable: var,
-                primary: levels[0],
-                secondary: levels[1],
-                tertiary: levels[2],
-            },
-        ))
-    } else {
-        Err(nom::Err::Incomplete(nom::Needed::Unknown))
-    }
-}
-
-fn parse_hex(i: &str) -> IResult<&str, u16> {
-    map_res(
-        recognize(many1(one_of("0123456789abcdefABCDEF"))),
-        |out: &str| u16::from_str_radix(out, 16),
-    )(i)
-}
-
-fn parse_char(i: &str) -> IResult<&str, char> {
-    map_opt(
-        recognize(many1(one_of("0123456789abcdefABCDEF"))),
-        |out: &str| {
-            u32::from_str_radix(out, 16)
-                .ok()
-                .and_then(|u| char::from_u32(u))
-        },
-    )(i)
-}
-
-fn parse_row(i: &str) -> IResult<&str, (String, Vec<CollationElement>)> {
-    let (i, char_points) = parse_element(i)?;
-    let (i, _) = take_sep(i)?;
-    let (i, key) = many1(parse_sortkey)(i)?;
-    let (i, _) = tuple((many0(char(' ')), char('#'), is_not("\n"), tag("\n")))(i)?;
-    Ok((i, (char_points, key)))
-}
-
 pub struct CollationElementTable {
     data: BTreeMap<String, Vec<CollationElement>>,
 }
@@ -116,26 +45,7 @@ pub struct CollationElementTable {
 impl CollationElementTable {
     pub fn from(i: &str) -> Result<Self, nom::Err<nom::error::Error<&str>>> {
         let mut data = BTreeMap::new();
-        let (i, _) = all_consuming(many1(alt((
-            // Empty line
-            value((), tag("\n")),
-            // A comment
-            value(
-                (),
-                tuple((space0, char('#'), opt(is_not("\n")), char('\n'))),
-            ),
-            value((), tuple((tag("@version"), is_not("\n"), char('\n')))),
-            // TODO: Implicit weight and version
-            value(
-                (),
-                tuple((tag("@implicitweights"), is_not("\n"), char('\n'))),
-            ),
-            // A row in the table
-            map(parse_row, |(char_points, key)| {
-                data.insert(char_points, key);
-            }),
-        ))))(i)?;
-        println!("{}", i);
+        parse::table(i, &mut data)?;
         Ok(Self { data })
     }
 }
@@ -163,15 +73,6 @@ impl<'a> CollationElements<'a> {
     }
 }
 
-// * Construct collation element array
-//   * Find longest initial substring S that has a match in the collation table
-//     * If there are non-starters following S, process each non-starter C
-//     * If C is an unblocked non-starter with respect to S, find if S+C has a match in the collation table
-//     * If there is a match remove S by S+C and remove C
-//   * Fetch the corresponding value from the table, else synthesize one (Derived Collation Elements)
-//   * Process collation elements according to variable weight setting
-//   * Append collation elements to the collation element array
-//   * Proceed to next point past S
 impl<'a> Iterator for CollationElements<'a> {
     type Item = Vec<CollationElement>;
 

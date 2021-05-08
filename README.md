@@ -1,7 +1,7 @@
 # Collate
 Implementation of [UTS #10](https://www.unicode.org/reports/tr10/), Unicode Collation Algorithm, in pure (and safe) Rust. It is currently a work in progress.
 
-# Planned Features
+## Planned Features
 This library is a work in progress. The checked features are implemented while the others are not.
 
 - [ ] Basic functionality
@@ -14,6 +14,9 @@ This library is a work in progress. The checked features are implemented while t
   - [ ] Customizable sort order
   - [ ] Customizable sort level
   - [ ] Locale-specific sort orders based on CLDR data.
+    - [ ] Parse CLDR data
+    - [ ] Math locale string to data
+    - [ ] Adapt DUCET to locale
 
 ## License
 Currently still undecided.
