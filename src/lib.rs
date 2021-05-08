@@ -14,9 +14,9 @@ use unic_normal::{Decompositions, StrNormalForm};
 #[derive(PartialEq, Eq, PartialOrd, Ord, Clone, Debug)]
 pub struct CollationElement {
     variable: bool,
-    symbol: u16,
-    diacritic: u16,
-    case: u16,
+    primary: u16,
+    secondary: u16,
+    tertiary: u16,
 }
 
 // * Parse the table
@@ -73,9 +73,9 @@ fn parse_sortkey(i: &str) -> IResult<&str, CollationElement> {
             i,
             CollationElement {
                 variable: var,
-                symbol: levels[0],
-                diacritic: levels[1],
-                case: levels[2],
+                primary: levels[0],
+                secondary: levels[1],
+                tertiary: levels[2],
             },
         ))
     } else {
@@ -193,16 +193,37 @@ impl<'a> Iterator for CollationElements<'a> {
     }
 }
 
-#[derive(Default, PartialEq, Eq, PartialOrd, Ord)]
+#[derive(Debug, Default, PartialEq, Eq)]
 pub struct SortKey {
-    symbols: Vec<u16>,
-    diacritics: Vec<u16>,
-    cases: Vec<u16>,
+    primary: Vec<u16>,
+    secondary: Vec<u16>,
+    tertiary: Vec<u16>,
 }
 
 impl SortKey {
     fn new() -> Self {
         Self::default()
+    }
+
+    fn iter(&self) -> impl Iterator<Item = &u16> {
+        self.primary
+            .iter()
+            .chain(std::iter::once(&0u16))
+            .chain(self.secondary.iter())
+            .chain(std::iter::once(&0u16))
+            .chain(self.tertiary.iter())
+    }
+}
+
+impl PartialOrd for SortKey {
+    fn partial_cmp(&self, other: &Self) -> Option<std::cmp::Ordering> {
+        self.iter().partial_cmp(other.iter())
+    }
+}
+
+impl Ord for SortKey {
+    fn cmp(&self, other: &Self) -> std::cmp::Ordering {
+        self.iter().cmp(other.iter())
     }
 }
 
@@ -210,20 +231,14 @@ impl SortKey {
 pub fn generate_sort_key(s: &str, table: &CollationElementTable) -> SortKey {
     let mut key = SortKey::new();
     for elem in CollationElements::from(&table, s).flatten() {
-        if elem.symbol != 0 {
-            key.symbols.push(elem.symbol);
-        } else {
-            continue;
+        if elem.primary != 0 {
+            key.primary.push(elem.primary);
         }
-
-        if elem.diacritic != 0 {
-            key.diacritics.push(elem.diacritic);
-        } else {
-            continue;
+        if elem.secondary != 0 {
+            key.secondary.push(elem.secondary);
         }
-
-        if elem.case != 0 {
-            key.cases.push(elem.case)
+        if elem.tertiary != 0 {
+            key.tertiary.push(elem.tertiary)
         }
     }
     key
@@ -233,18 +248,73 @@ pub fn generate_sort_key(s: &str, table: &CollationElementTable) -> SortKey {
 mod test {
     use super::*;
 
-    // Just to make sure it parses without any errors.
-    #[test]
-    fn just_print() {
-        let _table = CollationElementTable::from(DUCET).unwrap();
-    }
-
     #[test]
     fn ascii_strings() {
         let table = CollationElementTable::from(DUCET).unwrap();
 
+        // Casing has low precedence
         let mut v = ["a", "b", "C", "A", "c", "B"];
         v.sort_by_key(|s| generate_sort_key(s, &table));
         assert_eq!(v, ["a", "A", "b", "B", "c", "C"]);
+
+        // Casing has lower precedence than letters
+        let mut v = ["aaa", "aab", "aAa", "aAb", "aaA", "aaB"];
+        v.sort_by_key(|s| generate_sort_key(s, &table));
+        assert_eq!(v, ["aaa", "aaA", "aAa", "aab", "aaB", "aAb"]);
+
+        // Some real-world filenames typical in a Rust project
+        let mut v = [
+            "target",
+            "Cargo.lock",
+            "docs",
+            "README.md",
+            "Cargo.toml",
+            "LICENSE",
+            "benches",
+            "CONTRIBUTING.md",
+            "util",
+            "build.rs",
+            "DEVELOPER_INSTRUCTIONS.md",
+            "CODE_OF_CONDUCT.md",
+            "tests",
+            "src",
+            "examples",
+        ];
+
+        v.sort_by_key(|s| generate_sort_key(s, &table));
+
+        assert_eq!(
+            v,
+            [
+                "benches",
+                "build.rs",
+                "Cargo.lock",
+                "Cargo.toml",
+                "CODE_OF_CONDUCT.md",
+                "CONTRIBUTING.md",
+                "DEVELOPER_INSTRUCTIONS.md",
+                "docs",
+                "examples",
+                "LICENSE",
+                "README.md",
+                "src",
+                "target",
+                "tests",
+                "util",
+            ]
+        );
+    }
+
+    #[test]
+    fn diacritics() {
+        let table = CollationElementTable::from(DUCET).unwrap();
+
+        let mut v = ["cab", "dab", "Cab", "cáb"];
+        v.sort_by_key(|s| generate_sort_key(s, &table));
+        assert_eq!(v, ["cab", "Cab", "cáb", "dab"]);
+
+        let mut v = ["e", "A", "á", "a", "E", "Á", "é", "É"];
+        v.sort_by_key(|s| generate_sort_key(s, &table));
+        assert_eq!(v, ["a", "A", "á", "Á", "e", "E", "é", "É"]);
     }
 }
