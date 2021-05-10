@@ -22,7 +22,8 @@
 ///       * Reverse that list
 ///       * Append the CE_L values from that list to the sort key
 /// * Compare the keys, easy peasy
-mod parse;
+mod parse_cet;
+mod parse_cldr;
 use std::{cmp::Ordering, collections::BTreeMap, iter::Peekable, ops::Deref, str::Chars};
 
 use unic_normal::{Decompositions, StrNormalForm};
@@ -45,7 +46,7 @@ pub struct CollationElementTable {
 impl CollationElementTable {
     pub fn from(i: &str) -> Result<Self, nom::Err<nom::error::Error<&str>>> {
         let mut data = BTreeMap::new();
-        parse::table(i, &mut data)?;
+        parse_cet::table(i, &mut data)?;
         Ok(Self { data })
     }
 
@@ -144,7 +145,7 @@ impl Ord for SortKey {
     }
 }
 
-#[cfg(unix)]
+#[cfg(test)]
 mod test {
     use super::*;
 
