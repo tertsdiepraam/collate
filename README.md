@@ -30,7 +30,7 @@ the others are not.
     - [x] Extensions (`/`)
     - [x] Prefixes (`|`)
     - [x] Before (`[before 1|2|3]`)
-    - [ ] Comments (`#`)
+    - [x] Comments (`#`)
   - [ ] Applying the parsed rules to `allkeys_CLDR.txt`
   - [ ] Applying the settings
 

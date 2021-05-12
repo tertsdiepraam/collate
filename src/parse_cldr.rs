@@ -3,8 +3,8 @@ use nom::{
     bytes::complete::tag,
     character::{
         complete::{
-            alphanumeric1, anychar, char, multispace0, multispace1, none_of, one_of, satisfy,
-            space1,
+            alphanumeric1, anychar, char, line_ending, multispace0, multispace1, none_of,
+            not_line_ending, one_of, satisfy, space1,
         },
         is_hex_digit,
     },
@@ -35,15 +35,15 @@ enum RuleCommandType {
 
 pub fn cldr(i: &str) -> IResult<&str, ()> {
     all_consuming(delimited(
-        multispace0,
-        separated_pair(settings, multispace0, rules),
-        multispace0,
+        comment,
+        separated_pair(settings, comment, rules),
+        comment,
     ))(i)?;
     Ok((i, ()))
 }
 
 fn settings(i: &str) -> IResult<&str, Vec<(&str, &str)>> {
-    separated_list0(multispace0, setting)(i)
+    separated_list0(comment, setting)(i)
 }
 
 // [key value]
@@ -65,7 +65,7 @@ fn rules(i: &str) -> IResult<&str, Vec<RuleCommand>> {
 
 fn rule(i: &str) -> IResult<&str, Vec<RuleCommand>> {
     map(
-        preceded(multispace0, alt((increment, equal, set_context))),
+        preceded(comment, alt((increment, equal, set_context))),
         |command| vec![command],
     )(i)
 }
@@ -73,15 +73,9 @@ fn rule(i: &str) -> IResult<&str, Vec<RuleCommand>> {
 fn increment(i: &str) -> IResult<&str, RuleCommand> {
     let (i, (level, sequence, prefix, extension)) = tuple((
         map(many_m_n(1, 4, char('<')), |s| s.len() as u8),
-        preceded(multispace0, sequence),
-        opt(preceded(
-            tuple((multispace0, char('|'), multispace0)),
-            sequence,
-        )),
-        opt(preceded(
-            tuple((multispace0, char('/'), multispace0)),
-            sequence,
-        )),
+        preceded(comment, sequence),
+        opt(preceded(tuple((comment, char('|'), comment)), sequence)),
+        opt(preceded(tuple((comment, char('/'), comment)), sequence)),
     ))(i)?;
     Ok((
         i,
@@ -99,8 +93,8 @@ fn increment(i: &str) -> IResult<&str, RuleCommand> {
 fn set_context(i: &str) -> IResult<&str, RuleCommand> {
     map(
         preceded(
-            pair(char('&'), multispace0),
-            pair(opt(terminated(before, multispace0)), sequence),
+            pair(char('&'), comment),
+            pair(opt(terminated(before, comment)), sequence),
         ),
         |(before, sequence)| RuleCommand {
             command: RuleCommandType::SetContext { before },
@@ -121,7 +115,7 @@ fn before(i: &str) -> IResult<&str, u8> {
 }
 
 fn equal(i: &str) -> IResult<&str, RuleCommand> {
-    map(preceded(pair(char('='), multispace0), sequence), |s| {
+    map(preceded(pair(char('='), comment), sequence), |s| {
         RuleCommand {
             command: RuleCommandType::Equal,
             sequence: s,
@@ -200,6 +194,15 @@ fn hex_digits(n: u8) -> impl Fn(&str) -> IResult<&str, char> {
             },
         )(i)
     }
+}
+
+// Matches whitespace, optionally with a comment
+fn comment(i: &str) -> IResult<&str, ()> {
+    delimited(
+        multispace0,
+        value((), opt(tuple((char('#'), not_line_ending, line_ending)))),
+        multispace0,
+    )(i)
 }
 
 #[cfg(test)]
@@ -436,5 +439,23 @@ mod test {
                 }]
             ))
         );
+    }
+
+    #[test]
+    fn test_comment() {
+        assert_eq!(
+            rule("<< # comment 1\n   ab  # comment 2\n/#comment 3\ncd"),
+            Ok((
+                "",
+                vec![RuleCommand {
+                    command: RuleCommandType::Increment {
+                        level: 2,
+                        prefix: None,
+                        extension: Some("cd".into()),
+                    },
+                    sequence: "ab".into(),
+                }]
+            )),
+        )
     }
 }
