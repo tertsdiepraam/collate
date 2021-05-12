@@ -23,7 +23,7 @@
 ///       * Append the CE_L values from that list to the sort key
 /// * Compare the keys, easy peasy
 mod parse_cet;
-mod parse_cldr;
+pub mod parse_cldr;
 use std::{cmp::Ordering, collections::BTreeMap, iter::Peekable, ops::Deref, str::Chars};
 
 use unic_normal::{Decompositions, StrNormalForm};

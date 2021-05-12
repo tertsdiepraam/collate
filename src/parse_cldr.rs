@@ -5,9 +5,9 @@ use nom::{
         complete::{alphanumeric1, anychar, char, multispace0, none_of, satisfy, space1},
         is_hex_digit,
     },
-    combinator::{all_consuming, map, map_opt, recognize, value},
+    combinator::{all_consuming, map, map_opt, opt, recognize, value},
     multi::{count, many0, many1, many_m_n, separated_list0},
-    sequence::{delimited, preceded, separated_pair},
+    sequence::{delimited, pair, preceded, separated_pair, tuple},
     IResult,
 };
 
@@ -21,7 +21,11 @@ struct RuleCommand {
 enum RuleCommandType {
     SetContext,
     Equal,
-    Increment(u8),
+    Increment {
+        level: u8,
+        before: Option<String>,
+        extension: Option<String>,
+    },
 }
 
 pub fn cldr(i: &str) -> IResult<&str, ()> {
@@ -51,27 +55,58 @@ fn identifier(i: &str) -> IResult<&str, &str> {
 }
 
 fn rules(i: &str) -> IResult<&str, Vec<RuleCommand>> {
-    map(many0(comparison), |v| v.into_iter().flatten().collect())(i)
+    map(many0(rule), |v| v.into_iter().flatten().collect())(i)
 }
 
-fn comparison(i: &str) -> IResult<&str, Vec<RuleCommand>> {
+fn rule(i: &str) -> IResult<&str, Vec<RuleCommand>> {
     map(
-        preceded(
-            multispace0,
-            separated_pair(
-                alt((
-                    map(many_m_n(1, 4, char('<')), |s| {
-                        RuleCommandType::Increment(s.len() as u8)
-                    }),
-                    value(RuleCommandType::Equal, char('=')),
-                    value(RuleCommandType::SetContext, char('&')),
-                )),
-                multispace0,
-                sequence,
-            ),
-        ),
-        |(command, sequence)| vec![RuleCommand { command, sequence }],
+        preceded(multispace0, alt((increment, equal, set_context))),
+        |command| vec![command],
     )(i)
+}
+
+fn increment(i: &str) -> IResult<&str, RuleCommand> {
+    let (i, (level, sequence, before, extension)) = tuple((
+        map(many_m_n(1, 4, char('<')), |s| s.len() as u8),
+        preceded(multispace0, sequence),
+        opt(preceded(
+            tuple((multispace0, char('|'), multispace0)),
+            sequence,
+        )),
+        opt(preceded(
+            tuple((multispace0, char('/'), multispace0)),
+            sequence,
+        )),
+    ))(i)?;
+    Ok((
+        i,
+        RuleCommand {
+            command: RuleCommandType::Increment {
+                level,
+                before,
+                extension,
+            },
+            sequence,
+        },
+    ))
+}
+
+fn equal(i: &str) -> IResult<&str, RuleCommand> {
+    map(preceded(pair(char('='), multispace0), sequence), |s| {
+        RuleCommand {
+            command: RuleCommandType::Equal,
+            sequence: s,
+        }
+    })(i)
+}
+
+fn set_context(i: &str) -> IResult<&str, RuleCommand> {
+    map(preceded(pair(char('&'), multispace0), sequence), |s| {
+        RuleCommand {
+            command: RuleCommandType::SetContext,
+            sequence: s,
+        }
+    })(i)
 }
 
 fn is_reserved_char(c: char) -> bool {
@@ -181,9 +216,9 @@ mod test {
     }
 
     #[test]
-    fn test_rules() {
+    fn test_single_rules() {
         assert_eq!(
-            comparison("& a"),
+            rule("& a"),
             Ok((
                 "",
                 vec![RuleCommand {
@@ -194,16 +229,23 @@ mod test {
         );
 
         assert_eq!(
-            comparison("< a"),
+            rule("< a"),
             Ok((
                 "",
                 vec![RuleCommand {
-                    command: RuleCommandType::Increment(1),
+                    command: RuleCommandType::Increment {
+                        level: 1,
+                        before: None,
+                        extension: None
+                    },
                     sequence: "a".into()
                 }]
             ))
         );
+    }
 
+    #[test]
+    fn test_rules() {
         assert_eq!(
             rules("& a < b"),
             Ok((
@@ -214,7 +256,11 @@ mod test {
                         sequence: "a".into()
                     },
                     RuleCommand {
-                        command: RuleCommandType::Increment(1),
+                        command: RuleCommandType::Increment {
+                            level: 1,
+                            before: None,
+                            extension: None
+                        },
                         sequence: "b".into()
                     },
                 ]
@@ -231,19 +277,35 @@ mod test {
                         sequence: "a".into()
                     },
                     RuleCommand {
-                        command: RuleCommandType::Increment(1),
+                        command: RuleCommandType::Increment {
+                            level: 1,
+                            before: None,
+                            extension: None
+                        },
                         sequence: "b".into()
                     },
                     RuleCommand {
-                        command: RuleCommandType::Increment(2),
+                        command: RuleCommandType::Increment {
+                            level: 2,
+                            before: None,
+                            extension: None
+                        },
                         sequence: "c".into()
                     },
                     RuleCommand {
-                        command: RuleCommandType::Increment(3),
+                        command: RuleCommandType::Increment {
+                            level: 3,
+                            before: None,
+                            extension: None
+                        },
                         sequence: "d".into()
                     },
                     RuleCommand {
-                        command: RuleCommandType::Increment(4),
+                        command: RuleCommandType::Increment {
+                            level: 4,
+                            before: None,
+                            extension: None
+                        },
                         sequence: "e".into()
                     },
                     RuleCommand {
@@ -253,5 +315,68 @@ mod test {
                 ]
             ))
         );
+    }
+
+    #[test]
+    fn test_before_and_extension() {
+        assert_eq!(
+            rule("<<< ab | cd / ef"),
+            Ok((
+                "",
+                vec![RuleCommand {
+                    command: RuleCommandType::Increment {
+                        level: 3,
+                        before: Some("cd".into()),
+                        extension: Some("ef".into()),
+                    },
+                    sequence: "ab".into(),
+                }]
+            )),
+        );
+
+        assert_eq!(
+            rule("<<< ab|cd/ef"),
+            Ok((
+                "",
+                vec![RuleCommand {
+                    command: RuleCommandType::Increment {
+                        level: 3,
+                        before: Some("cd".into()),
+                        extension: Some("ef".into()),
+                    },
+                    sequence: "ab".into(),
+                }]
+            )),
+        );
+
+        assert_eq!(
+            rule("<<ab|cd"),
+            Ok((
+                "",
+                vec![RuleCommand {
+                    command: RuleCommandType::Increment {
+                        level: 2,
+                        before: Some("cd".into()),
+                        extension: None,
+                    },
+                    sequence: "ab".into(),
+                }]
+            )),
+        );
+
+        assert_eq!(
+            rule("<<ab/cd"),
+            Ok((
+                "",
+                vec![RuleCommand {
+                    command: RuleCommandType::Increment {
+                        level: 2,
+                        before: None,
+                        extension: Some("cd".into()),
+                    },
+                    sequence: "ab".into(),
+                }]
+            )),
+        )
     }
 }
