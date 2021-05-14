@@ -28,8 +28,8 @@ use std::{cmp::Ordering, collections::BTreeMap, iter::Peekable, ops::Deref, str:
 
 use unic_normal::{Decompositions, StrNormalForm};
 
-// Default Unicode Collation Element Table
-static DUCET: &'static str = include_str!("../external/allkeys.txt");
+// Default Unicode Collation Element Table (adjusted for CLDR)
+static DUCET: &'static str = include_str!("../cldr/common/uca/allkeys_CLDR.txt");
 
 #[derive(PartialEq, Eq, PartialOrd, Ord, Clone, Debug)]
 pub struct CollationElement {

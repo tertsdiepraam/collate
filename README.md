@@ -25,7 +25,7 @@ the others are not.
     - [ ] Surrounding XML
     - [x] Settings in `[key value]` format
     - [x] Operators: `<`, `<<`, `<<<`, `<<<<`, `&` and `=`
-    - [ ] Operators: `<*`, `<<*`, `<<<*`, `<<<<*` and `=*`
+    - [x] Operators: `<*`, `<<*`, `<<<*`, `<<<<*` and `=*`
     - [x] Escaped characters
     - [x] Extensions (`/`)
     - [x] Prefixes (`|`)
