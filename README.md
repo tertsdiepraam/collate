@@ -35,7 +35,7 @@ the others are not.
   - [ ] Applying the settings
   - [ ] Create tailoring based on locale spec
 
-# Related Resources
+## Related Resources
 
 This implementation is based on the following resources:
 
