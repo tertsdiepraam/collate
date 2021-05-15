@@ -9,3 +9,4 @@ edition = "2018"
 [dependencies]
 unic-normal = "0.9.0"
 nom = "6.1.2"
+strong-xml = "0.6.2"

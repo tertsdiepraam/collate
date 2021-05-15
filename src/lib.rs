@@ -23,6 +23,8 @@
 ///       * Append the CE_L values from that list to the sort key
 /// * Compare the keys, easy peasy
 mod parse_cet;
+mod ldml;
+mod locale;
 pub mod parse_cldr;
 use std::{cmp::Ordering, collections::BTreeMap, iter::Peekable, ops::Deref, str::Chars};
 
@@ -72,6 +74,13 @@ impl Deref for CollationElementTable {
 
     fn deref(&self) -> &Self::Target {
         &self.data
+    }
+}
+
+impl Default for CollationElementTable {
+    fn default() -> Self {
+        // Assume that parsing DUCET will not throw an error
+        Self::from(DUCET).unwrap()
     }
 }
 
@@ -151,7 +160,7 @@ mod test {
 
     #[test]
     fn ascii_strings() {
-        let table = CollationElementTable::from(DUCET).unwrap();
+        let table = CollationElementTable::default();
 
         // Casing has low precedence
         let mut v = ["a", "b", "C", "A", "c", "B"];
@@ -208,7 +217,7 @@ mod test {
 
     #[test]
     fn diacritics() {
-        let table = CollationElementTable::from(DUCET).unwrap();
+        let table = CollationElementTable::default();
 
         let mut v = ["cab", "dab", "Cab", "cáb"];
         v.sort_by_key(|s| table.generate_sort_key(s));
