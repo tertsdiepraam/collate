@@ -19,8 +19,7 @@ the others are not.
   - [ ] Generate sort keys from implicit weights
   - [ ] Handling of invalid unicode
 - [ ] Tailoring
-
-  - [ ] Parse `allkeys_CLDR.txt`
+  - [x] Parse `allkeys_CLDR.txt`
   - [ ] Parsing collation tailoring syntax
     - [ ] Surrounding XML
     - [x] Settings in `[key value]` format
@@ -31,8 +30,10 @@ the others are not.
     - [x] Prefixes (`|`)
     - [x] Before (`[before 1|2|3]`)
     - [x] Comments (`#`)
+  - [ ] Parse at build time
   - [ ] Applying the parsed rules to `allkeys_CLDR.txt`
   - [ ] Applying the settings
+  - [ ] Create tailoring based on locale spec
 
 # Related Resources
 
