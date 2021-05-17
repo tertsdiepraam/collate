@@ -25,7 +25,7 @@
 mod parse_cet;
 mod ldml;
 mod locale;
-pub mod parse_cldr;
+pub mod collation_rules;
 use std::{cmp::Ordering, collections::BTreeMap, iter::Peekable, ops::Deref, str::Chars};
 
 use unic_normal::{Decompositions, StrNormalForm};

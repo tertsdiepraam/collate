@@ -1,6 +1,9 @@
-use strong_xml::XmlRead;
-use crate::ldml::{LDML, Collation};
+use crate::{
+    collation_rules::{self, Collation},
+    ldml::LDML,
+};
 use std::convert::TryFrom;
+use strong_xml::XmlRead;
 
 // A more sensible format for the tailoring
 #[derive(Debug, PartialEq)]
@@ -16,30 +19,48 @@ struct Identity {
     territory: Option<String>,
 }
 
-impl From<LDML> for Locale {
-    fn from(ldml: LDML) -> Self {
-        Self {
+#[derive(Debug)]
+enum Error {
+    RuleParseError,
+    XMLError,
+}
+
+impl TryFrom<LDML> for Locale {
+    type Error = Error;
+    fn try_from(ldml: LDML) -> Result<Self, Self::Error> {
+        Ok(Self {
             identity: Identity {
                 version: ldml.identity.version.number,
                 language: ldml.identity.language.r#type,
                 territory: ldml.identity.territory.map(|t| t.r#type),
             },
-            collations: ldml.collations.collation,
-        }
+            collations: ldml
+                .collations
+                .collation
+                .into_iter()
+                .map(|c| {
+                    Ok(Collation {
+                        r#type: c.r#type,
+                        rules: collation_rules::cldr(&c.rules.join(""))
+                            .map_err(|_| Error::RuleParseError)?,
+                    })
+                })
+                .collect::<Result<Vec<_>, _>>()?,
+        })
     }
 }
 
 impl TryFrom<&str> for Locale {
-    type Error = strong_xml::XmlError;
+    type Error = Error;
     fn try_from(s: &str) -> Result<Self, Self::Error> {
-        Ok(Self::from(LDML::from_str(s)?))
+        Self::try_from(LDML::from_str(s).map_err(|_| Error::XMLError)?)
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::ldml::*;
+    use crate::collation_rules::{CollationRules, Rule};
 
     #[test]
     fn test_tailoring() {
@@ -56,7 +77,8 @@ mod tests {
                         </collation>
                     </collations>
                 </ldml>",
-            ).unwrap(),
+            )
+            .unwrap(),
             Locale {
                 identity: Identity {
                     version: "$Revision$".into(),
@@ -65,7 +87,22 @@ mod tests {
                 },
                 collations: vec![Collation {
                     r#type: "standard".into(),
-                    rules: vec!["&N<<<ŉ".into()]
+                    rules: CollationRules {
+                        settings: vec![],
+                        rules: vec![
+                            Rule::SetContext {
+                                sequence: "N".into(),
+                                before: None,
+                            },
+                            Rule::Increment {
+                                level: 3,
+                                sequence: "ŉ".into(),
+                                prefix: None,
+                                extension: None,
+
+                            }
+                        ],
+                    },
                 }]
             }
         )

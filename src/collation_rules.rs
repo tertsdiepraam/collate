@@ -17,7 +17,19 @@ use nom::{
 };
 
 #[derive(Eq, PartialEq, Debug, Clone)]
-pub enum RuleCommand {
+pub struct Collation {
+    pub(crate) r#type: String,
+    pub(crate) rules: CollationRules,
+}
+
+#[derive(Eq, PartialEq, Debug, Clone)]
+pub struct CollationRules {
+    pub(crate) settings: Vec<(String, String)>,
+    pub(crate) rules: Vec<Rule>,
+}
+
+#[derive(Eq, PartialEq, Debug, Clone)]
+pub enum Rule {
     SetContext {
         before: Option<u8>,
         sequence: String,
@@ -46,23 +58,34 @@ pub enum SequenceElement {
     Char(char),
 }
 
-pub fn cldr(i: &str) -> IResult<&str, (Vec<(&str, &str)>, Vec<RuleCommand>)> {
-    all_consuming(delimited(
-        comment,
-        separated_pair(settings, comment, rules),
-        comment,
-    ))(i)
+pub fn cldr<'a>(i: &'a str) -> Result<CollationRules, nom::Err<nom::error::Error<&'a str>>> {
+    match map(
+        all_consuming(delimited(
+            comment,
+            separated_pair(settings, comment, rules),
+            comment,
+        )),
+        |(settings, rules)| CollationRules { settings, rules },
+    )(i)
+    {
+        Ok((_, col)) => Ok(col),
+        Err(x) => Err(x),
+    }
 }
 
-fn settings(i: &str) -> IResult<&str, Vec<(&str, &str)>> {
+fn settings(i: &str) -> IResult<&str, Vec<(String, String)>> {
     separated_list0(comment, setting)(i)
 }
 
 // [key value]
-fn setting(i: &str) -> IResult<&str, (&str, &str)> {
+fn setting(i: &str) -> IResult<&str, (String, String)> {
     delimited(
         char('['),
-        separated_pair(identifier, space1, identifier),
+        separated_pair(
+            map(identifier, |s| s.into()),
+            space1,
+            map(identifier, |s| s.into()),
+        ),
         char(']'),
     )(i)
 }
@@ -71,15 +94,18 @@ fn identifier(i: &str) -> IResult<&str, &str> {
     recognize(many1(alt((alphanumeric1, tag("-")))))(i)
 }
 
-fn rules(i: &str) -> IResult<&str, Vec<RuleCommand>> {
+fn rules(i: &str) -> IResult<&str, Vec<Rule>> {
     many0(rule)(i)
 }
 
-fn rule(i: &str) -> IResult<&str, RuleCommand> {
-    preceded(comment, alt((multi_increment, increment, multi_equal, equal, set_context)))(i)
+fn rule(i: &str) -> IResult<&str, Rule> {
+    preceded(
+        comment,
+        alt((multi_increment, increment, multi_equal, equal, set_context)),
+    )(i)
 }
 
-fn multi_increment(i: &str) -> IResult<&str, RuleCommand> {
+fn multi_increment(i: &str) -> IResult<&str, Rule> {
     let (i, (level, multisequence)) = separated_pair(
         map(many_m_n(1, 4, char('<')), |s| s.len() as u8),
         char('*'),
@@ -87,14 +113,14 @@ fn multi_increment(i: &str) -> IResult<&str, RuleCommand> {
     )(i)?;
     Ok((
         i,
-        RuleCommand::MultiIncrement {
+        Rule::MultiIncrement {
             level,
             multisequence,
-        }
+        },
     ))
 }
 
-fn increment(i: &str) -> IResult<&str, RuleCommand> {
+fn increment(i: &str) -> IResult<&str, Rule> {
     let (i, (level, sequence, prefix, extension)) = tuple((
         map(many_m_n(1, 4, char('<')), |s| s.len() as u8),
         preceded(comment, sequence),
@@ -103,7 +129,7 @@ fn increment(i: &str) -> IResult<&str, RuleCommand> {
     ))(i)?;
     Ok((
         i,
-        RuleCommand::Increment {
+        Rule::Increment {
             level,
             prefix,
             extension,
@@ -112,13 +138,13 @@ fn increment(i: &str) -> IResult<&str, RuleCommand> {
     ))
 }
 
-fn set_context(i: &str) -> IResult<&str, RuleCommand> {
+fn set_context(i: &str) -> IResult<&str, Rule> {
     map(
         preceded(
             pair(char('&'), comment),
             pair(opt(terminated(before, comment)), sequence),
         ),
-        |(before, sequence)| RuleCommand::SetContext { before, sequence },
+        |(before, sequence)| Rule::SetContext { before, sequence },
     )(i)
 }
 
@@ -133,15 +159,16 @@ fn before(i: &str) -> IResult<&str, u8> {
     )(i)
 }
 
-fn multi_equal(i: &str) -> IResult<&str, RuleCommand> {
-    map(preceded(pair(tag("=*"), comment), multisequence), |multisequence| {
-        RuleCommand::MultiEqual { multisequence }
-    })(i)
+fn multi_equal(i: &str) -> IResult<&str, Rule> {
+    map(
+        preceded(pair(tag("=*"), comment), multisequence),
+        |multisequence| Rule::MultiEqual { multisequence },
+    )(i)
 }
 
-fn equal(i: &str) -> IResult<&str, RuleCommand> {
+fn equal(i: &str) -> IResult<&str, Rule> {
     map(preceded(pair(char('='), comment), sequence), |sequence| {
-        RuleCommand::Equal { sequence }
+        Rule::Equal { sequence }
     })(i)
 }
 
@@ -280,7 +307,7 @@ mod test {
             rule("& a"),
             Ok((
                 "",
-                RuleCommand::SetContext {
+                Rule::SetContext {
                     before: None,
                     sequence: "a".into()
                 },
@@ -291,7 +318,7 @@ mod test {
             rule("< a"),
             Ok((
                 "",
-                RuleCommand::Increment {
+                Rule::Increment {
                     level: 1,
                     prefix: None,
                     extension: None,
@@ -302,25 +329,31 @@ mod test {
 
         assert_eq!(
             rule("<* abc-z"),
-            Ok(("", RuleCommand::MultiIncrement {
-                level: 1,
-                multisequence: vec![
-                    SequenceElement::Char('a'),
-                    SequenceElement::Char('b'),
-                    SequenceElement::Range('c'..='z'),
-                ]
-            }))
+            Ok((
+                "",
+                Rule::MultiIncrement {
+                    level: 1,
+                    multisequence: vec![
+                        SequenceElement::Char('a'),
+                        SequenceElement::Char('b'),
+                        SequenceElement::Range('c'..='z'),
+                    ]
+                }
+            ))
         );
 
         assert_eq!(
             rule("=* abc-z"),
-            Ok(("", RuleCommand::MultiEqual {
-                multisequence: vec![
-                    SequenceElement::Char('a'),
-                    SequenceElement::Char('b'),
-                    SequenceElement::Range('c'..='z'),
-                ]
-            }))
+            Ok((
+                "",
+                Rule::MultiEqual {
+                    multisequence: vec![
+                        SequenceElement::Char('a'),
+                        SequenceElement::Char('b'),
+                        SequenceElement::Range('c'..='z'),
+                    ]
+                }
+            ))
         )
     }
 
@@ -331,11 +364,11 @@ mod test {
             Ok((
                 "",
                 vec![
-                    RuleCommand::SetContext {
+                    Rule::SetContext {
                         before: None,
                         sequence: "a".into(),
                     },
-                    RuleCommand::Increment {
+                    Rule::Increment {
                         level: 1,
                         prefix: None,
                         extension: None,
@@ -350,35 +383,35 @@ mod test {
             Ok((
                 "",
                 vec![
-                    RuleCommand::SetContext {
+                    Rule::SetContext {
                         before: None,
                         sequence: "a".into(),
                     },
-                    RuleCommand::Increment {
+                    Rule::Increment {
                         level: 1,
                         prefix: None,
                         extension: None,
                         sequence: "b".into(),
                     },
-                    RuleCommand::Increment {
+                    Rule::Increment {
                         level: 2,
                         prefix: None,
                         extension: None,
                         sequence: "c".into(),
                     },
-                    RuleCommand::Increment {
+                    Rule::Increment {
                         level: 3,
                         prefix: None,
                         extension: None,
                         sequence: "d".into(),
                     },
-                    RuleCommand::Increment {
+                    Rule::Increment {
                         level: 4,
                         prefix: None,
                         extension: None,
                         sequence: "e".into(),
                     },
-                    RuleCommand::Equal {
+                    Rule::Equal {
                         sequence: "f".into(),
                     }
                 ]
@@ -392,7 +425,7 @@ mod test {
             rule("<<< ab | cd / ef"),
             Ok((
                 "",
-                RuleCommand::Increment {
+                Rule::Increment {
                     level: 3,
                     prefix: Some("cd".into()),
                     extension: Some("ef".into()),
@@ -405,7 +438,7 @@ mod test {
             rule("<<< ab|cd/ef"),
             Ok((
                 "",
-                RuleCommand::Increment {
+                Rule::Increment {
                     level: 3,
                     prefix: Some("cd".into()),
                     extension: Some("ef".into()),
@@ -418,7 +451,7 @@ mod test {
             rule("<<ab|cd"),
             Ok((
                 "",
-                RuleCommand::Increment {
+                Rule::Increment {
                     level: 2,
                     prefix: Some("cd".into()),
                     extension: None,
@@ -431,7 +464,7 @@ mod test {
             rule("<<ab/cd"),
             Ok((
                 "",
-                RuleCommand::Increment {
+                Rule::Increment {
                     level: 2,
                     prefix: None,
                     extension: Some("cd".into()),
@@ -449,7 +482,7 @@ mod test {
             rule("&[before 2] a"),
             Ok((
                 "",
-                RuleCommand::SetContext {
+                Rule::SetContext {
                     before: Some(2),
                     sequence: "a".into(),
                 }
@@ -460,7 +493,7 @@ mod test {
             rule("&    [before      1] a"),
             Ok((
                 "",
-                RuleCommand::SetContext {
+                Rule::SetContext {
                     before: Some(1),
                     sequence: "a".into(),
                 }
@@ -471,7 +504,7 @@ mod test {
             rule("&[before 3]a"),
             Ok((
                 "",
-                RuleCommand::SetContext {
+                Rule::SetContext {
                     before: Some(3),
                     sequence: "a".into(),
                 }
@@ -485,7 +518,7 @@ mod test {
             rule("<< # comment 1\n   ab  # comment 2\n/#comment 3\ncd"),
             Ok((
                 "",
-                RuleCommand::Increment {
+                Rule::Increment {
                     level: 2,
                     prefix: None,
                     extension: Some("cd".into()),
